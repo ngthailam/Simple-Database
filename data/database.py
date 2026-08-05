@@ -4,9 +4,9 @@ from data.schema import ColumnDef, ColumnType
 from data.table import Table
 
 class Database:
-    def __init__(self, filename: str):
-        self.pager = Pager(filename)
-        self.catalog = Catalog(self.pager)
+    def __init__(self, pager: Pager, catalog: Catalog):
+        self.pager = pager
+        self.catalog = catalog
         self.open_tables: dict[str, Table] = {}
 
     def create_table(self, name: str, columns: list[ColumnDef]):
@@ -14,6 +14,10 @@ class Database:
         table_def = self.catalog.create_table(name, columns, root_page)
         self.open_tables[name] = Table(self.pager, table_def)
         return table_def
+    
+    def delete_table(self, name: str):
+        self.catalog.delete_table(name)
+        self.open_tables.pop(name, None)
 
     def insert(self, table_name: str, values: list):
         table = self._get_table(table_name)
@@ -22,10 +26,17 @@ class Database:
     def select_all(self, table_name: str) -> list[tuple]:
         table = self._get_table(table_name)
         return table.select_all()
+    
+    def delete():
+        pass
+
+    def flush(self):
+        for table in self.open_tables.values():
+            table.flush_header()  # persist e.g. num_rows
+        self.pager.flush_all()
 
     def close(self):
-        for table in self.open_tables.values():
-            table.flush_header()  # persist e.g. num_rows, without closing shared pager
+        self.flush()
         self.pager.close()
 
     # Private methods

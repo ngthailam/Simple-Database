@@ -91,3 +91,29 @@ class Catalog:
         table_def = TableDef(name, root_page, columns)
         self.tables[name] = table_def
         return table_def
+
+    def delete_table(self, name: str):
+        if name not in self.tables:
+            raise ValueError(f"no such table: '{name}'")
+
+        # self.tables preserves insertion order, which matches the physical
+        # slot order in the header page — use it to find this table's slot index.
+        index = list(self.tables.keys()).index(name)
+        header_page = self.pager.get_page(HEADER_PAGE)
+
+        # Shift every later entry down one slot to keep entries dense (slots
+        # 0..num_tables_used-1), since num_tables_used assumes no gaps.
+        for i in range(index, self.num_tables_used - 1):
+            src_offset = HEADER_SIZE + (i + 1) * TABLE_ENTRY_SIZE
+            dst_offset = HEADER_SIZE + i * TABLE_ENTRY_SIZE
+            header_page[dst_offset:dst_offset + TABLE_ENTRY_SIZE] = \
+                header_page[src_offset:src_offset + TABLE_ENTRY_SIZE]
+
+        # Zero out the now-unused last slot.
+        last_offset = HEADER_SIZE + (self.num_tables_used - 1) * TABLE_ENTRY_SIZE
+        header_page[last_offset:last_offset + TABLE_ENTRY_SIZE] = bytes(TABLE_ENTRY_SIZE)
+
+        self.num_tables_used -= 1
+        struct.pack_into(HEADER_FORMAT, header_page, 0, self.num_tables_used)
+
+        del self.tables[name]
