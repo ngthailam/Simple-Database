@@ -1,57 +1,92 @@
 import struct
 from data.pager import Pager, PAGE_SIZE
-from data.row import ROW_FORMAT, ROW_SIZE, serialize_row, deserialize_row
+from data.schema import ColumnDef, ColumnType
+from data.catalog import TableDef
 
-ROWS_PER_PAGE = PAGE_SIZE // ROW_SIZE
+MAX_DATA_PAGES = 200
 
-HEADER_PAGE = 0
-DATA_PAGE_OFFSET = 1 # use page 0 as meta data
+# root page header: num_rows(4) + num_pages_used(4) + page_numbers[MAX_DATA_PAGES](4 each)
+TABLE_HEADER_FORMAT = f'<ii{MAX_DATA_PAGES}i'
+TABLE_HEADER_SIZE = struct.calcsize(TABLE_HEADER_FORMAT)
+
+TYPE_TO_STRUCT_CHAR = {
+    ColumnType.INT: 'i',
+    ColumnType.TEXT: 's',
+}
+
 
 class Table:
-    def __init__(self, filename: str):
-        self.pager = Pager(filename)
-        header = self.pager.get_page(HEADER_PAGE)
-        self.num_rows = struct.unpack_from('<i', header, 0)[0]
+    def __init__(self, pager: Pager, table_def: TableDef):
+        self.pager = pager
+        self.table_def = table_def
+        self.root_page = table_def.root_page
 
-    def insert(self, id: int, username: str, email: str):
-        page_num = DATA_PAGE_OFFSET + (self.num_rows // ROWS_PER_PAGE)
-        offset = (self.num_rows % ROWS_PER_PAGE) * ROW_SIZE
-        end_offset = offset + ROW_SIZE
+        self.row_format, self.row_size = self._build_row_format(table_def.columns)
+        self.rows_per_page = PAGE_SIZE // self.row_size
 
-        page = self.pager.get_page(page_num)
-        row_bytes = serialize_row(id, username, email)
-        page[offset:end_offset] = row_bytes
+        header = self.pager.get_page(self.root_page)
+        unpacked = struct.unpack_from(TABLE_HEADER_FORMAT, header, 0)
+        self.num_rows = unpacked[0]
+        self.num_pages_used = unpacked[1]
+        self.page_numbers = list(unpacked[2:2 + self.num_pages_used])
+
+    def _build_row_format(self, columns: list[ColumnDef]):
+        fmt = '<'
+        for col in columns:
+            char = TYPE_TO_STRUCT_CHAR[col.type]
+            fmt += f'{col.size}{char}' if char == 's' else char
+        return fmt, struct.calcsize(fmt)
+
+    def _get_data_page(self, page_index: int):
+        if page_index < self.num_pages_used:
+            return self.pager.get_page(self.page_numbers[page_index])
+
+        if self.num_pages_used >= MAX_DATA_PAGES:
+            raise ValueError(f"table '{self.table_def.name}' reached max pages ({MAX_DATA_PAGES})")
+
+        new_page_num = self.pager.allocate_new_page()
+        self.page_numbers.append(new_page_num)
+        self.num_pages_used += 1
+        return self.pager.get_page(new_page_num)
+
+    def insert(self, values: list):
+        packed_values = []
+        for value, col in zip(values, self.table_def.columns):
+            if col.type == ColumnType.TEXT:
+                packed_values.append(value.encode('utf-8'))
+            else:
+                packed_values.append(value)
+
+        row_bytes = struct.pack(self.row_format, *packed_values)
+
+        page_index = self.num_rows // self.rows_per_page
+        offset = (self.num_rows % self.rows_per_page) * self.row_size
+
+        page = self._get_data_page(page_index)
+        page[offset:offset + self.row_size] = row_bytes
 
         self.num_rows += 1
 
-    def select_all(self) -> list[tuple[int, str, str]]:
+    def select_all(self) -> list[tuple]:
         results = []
         for row_index in range(self.num_rows):
-            page_num = DATA_PAGE_OFFSET + (row_index // ROWS_PER_PAGE)
-            offset = (row_index % ROWS_PER_PAGE) * ROW_SIZE
-            end_offset = offset + ROW_SIZE
+            page_index = row_index // self.rows_per_page
+            offset = (row_index % self.rows_per_page) * self.row_size
 
-            page = self.pager.get_page(page_num)
-            row_bytes = bytes(page[offset:end_offset])
-            results.append(deserialize_row(row_bytes))
+            page = self.pager.get_page(self.page_numbers[page_index])
+            raw = struct.unpack_from(self.row_format, page, offset)
 
+            row = []
+            for value, col in zip(raw, self.table_def.columns):
+                if col.type == ColumnType.TEXT:
+                    row.append(value.rstrip(b'\x00').decode('utf-8'))
+                else:
+                    row.append(value)
+            results.append(tuple(row))
         return results
-    
-    def close(self):
-        header = self.pager.get_page(HEADER_PAGE)
-        struct.pack_into('<i', header, 0, self.num_rows)
-        self.pager.close()
-        
-if __name__ == '__main__':
-    table = Table('mydb.db')
-    table.insert(1, 'alice', 'alice@example.com')
-    table.insert(2, 'bob', 'bob@example.com')
-    print(table.select_all())
-    table.close()
 
-    # reopen to confirm persistence
-    table2 = Table('mydb.db')
-    print(table2.select_all())
-    table2.insert(3, 'carol', 'carol@example.com')
-    print(table2.select_all())
-    table2.close()
+    def flush_header(self):
+        header = self.pager.get_page(self.root_page)
+        padded_pages = self.page_numbers + [0] * (MAX_DATA_PAGES - len(self.page_numbers))
+        struct.pack_into(TABLE_HEADER_FORMAT, header, 0,
+                          self.num_rows, self.num_pages_used, *padded_pages)

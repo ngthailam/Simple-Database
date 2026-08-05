@@ -1,5 +1,7 @@
 import os
 
+HEADER_PAGE = 0
+
 PAGE_SIZE = 4096 # 4KB
 MAX_PAGES = 100
 
@@ -13,9 +15,14 @@ class Pager:
             open(filename, 'wb').close()
         self.file = open(filename, 'r+b')
         self.file_length = os.path.getsize(filename)
-        # @key: page index
-        # @value: bytes value
+        self.num_pages = max(1, self.file_length // PAGE_SIZE)  # page 0 always reserved
         self.pages: dict[int, bytearray] = {}
+
+    def allocate_new_page(self) -> int:
+        page_num = self.num_pages
+        self.num_pages += 1
+        self.get_page(page_num)  # ensures a blank page is created and cached
+        return page_num
         
     def get_page(self, page_num: int) -> bytearray:
         if page_num > MAX_PAGES:

@@ -1,42 +1,55 @@
-# Binder -> Optimizer
+import os
+from data.database import Database
+from data.schema import ColumnDef, ColumnType
 
-from data.table import *
-from validator.query_validator import *
+DB_FILE = 'test_e2e.db'
 
-def main():
-    table = Table('mydb.db')
+if os.path.exists(DB_FILE):
+    os.remove(DB_FILE)  # start clean each run
 
-    while True:
-        line = input('db > ').strip()
+# --- first session: create tables, insert rows ---
+db = Database(DB_FILE)
 
-        if line == '.exit':
-            break
+db.create_table('users', [
+    ColumnDef('id', ColumnType.INT, 4),
+    ColumnDef('username', ColumnType.TEXT, 32),
+    ColumnDef('email', ColumnType.TEXT, 255),
+])
 
-        parts = line.split(' ')
-        command = parts[0]
+db.create_table('posts', [
+    ColumnDef('id', ColumnType.INT, 4),
+    ColumnDef('title', ColumnType.TEXT, 64),
+])
 
-        if command == 'insert':
-            try:
-                QueryValidator.validateInsert(parts)
+db.insert('users', [1, 'alice', 'alice@example.com'])
+db.insert('users', [2, 'bob', 'bob@example.com'])
+db.insert('posts', [1, 'hello world'])
 
-                username, email = parts[2], parts[3]
-                try:
-                    table.insert(int(parts[1]), username, email)
-                    print("Executed.")
-                except ValueError as e:
-                    print(f"Error: {e}")
+print("users (before close):", db.select_all('users'))
+print("posts (before close):", db.select_all('posts'))
 
-            except ValueError as e:
-                print(f"Validation Error: {e}")
+db.close()
 
-        elif command == 'select':
-            for row in table.select_all():
-                print(row)
+# --- second session: reopen, confirm persistence, insert more ---
+db2 = Database(DB_FILE)
 
-        else:
-            print(f"Unrecognized command: '{line}'")
+print("users (after reopen):", db2.select_all('users'))
+print("posts (after reopen):", db2.select_all('posts'))
 
-    table.close()
+db2.insert('users', [3, 'carol', 'carol@example.com'])
+print("users (after new insert):", db2.select_all('users'))
 
-if __name__ == '__main__':
-    main()
+# --- sanity checks on catalog behavior ---
+try:
+    db2.create_table('users', [ColumnDef('id', ColumnType.INT, 4)])
+    print("ERROR: expected duplicate table creation to raise")
+except ValueError as e:
+    print("OK, duplicate rejected:", e)
+
+try:
+    db2.select_all('does_not_exist')
+    print("ERROR: expected missing table to raise")
+except ValueError as e:
+    print("OK, missing table rejected:", e)
+
+db2.close()
