@@ -3,6 +3,7 @@ from lib.query.query_validator import *
 from lib.query.query_type import *
 from lib.binder.binder import *
 from lib.sqlast.basic_ast import *
+from lib.optimizer.optimizer import *
 
 DB_FILE = 'test_e2e.db'
 
@@ -35,6 +36,7 @@ class Engine:
         self.binder = Binder(catalog=catalog)
         self.query_validator = QueryValidator()
         self.ast = BasicAst()
+        self.optimizer = Optimizer(catalog=catalog)
 
     def handle_command(self, command: str) -> str:
         try:
@@ -55,10 +57,11 @@ class Engine:
             if not binder_resolved:
                 return f"Invalid table names/cols"
             
-            # TODO: Optimizer to optimize
+            # Optimize command
+            optimized_command = self.optimizer.optimize(command=command)
             
             # Run actual query
-            ast_command = self.ast.parse(query_type=query_type, command_str=command)
+            ast_command = self.ast.parse(query_type=query_type, command_str=optimized_command)
             data = self.exec_db_by_type(ast_command=ast_command)
 
             if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE, QueryType.UPDATE, QueryType.DROP_TABLE):
