@@ -1,7 +1,7 @@
 import re
 
-from query.query_type import QueryType, get_query_type
-from query.commands import (
+from lib.query.query_type import QueryType, get_query_type
+from lib.query.commands import (
     Command,
     SelectCommand,
     InsertCommand,
@@ -10,7 +10,7 @@ from query.commands import (
     UpdateCommand,
     DeleteCommand,
 )
-from data.schema import ColumnDef, ColumnType
+from lib.data.schema import ColumnDef, ColumnType
 
 
 def _parse_value(raw: str):

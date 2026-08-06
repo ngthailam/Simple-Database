@@ -1,7 +1,7 @@
 import struct
-from data.pager import Pager, PAGE_SIZE
-from data.schema import ColumnDef, ColumnType
-from data.catalog import TableDef
+from lib.data.pager import Pager, PAGE_SIZE
+from lib.data.schema import ColumnDef, ColumnType
+from lib.data.catalog import TableDef
 
 MAX_DATA_PAGES = 200
 

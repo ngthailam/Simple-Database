@@ -1,7 +1,7 @@
-from data.pager import Pager, PAGE_SIZE
-from data.catalog import Catalog, MAX_TABLES, MAX_COLUMNS
-from data.schema import ColumnDef, ColumnType
-from data.table import Table
+from lib.data.pager import Pager, PAGE_SIZE
+from lib.data.catalog import Catalog, MAX_TABLES, MAX_COLUMNS
+from lib.data.schema import ColumnDef, ColumnType
+from lib.data.table import Table
 
 class Database:
     def __init__(self, pager: Pager, catalog: Catalog):

@@ -1,5 +1,5 @@
-from data.pager import Pager, PAGE_SIZE
-from data.schema import *
+from lib.data.pager import Pager, PAGE_SIZE
+from lib.data.schema import *
 import struct
 
 HEADER_PAGE = 0

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from data.schema import ColumnDef
+from lib.data.schema import ColumnDef
 
 
 class Command:

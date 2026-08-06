@@ -1,4 +1,4 @@
-from data.catalog import *
+from lib.data.catalog import *
 
 class Binder:
     def __init__(self, catalog: Catalog):

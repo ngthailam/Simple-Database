@@ -1,8 +1,8 @@
-from data.database import *
-from query.query_validator import *
-from query.query_type import *
-from binder.binder import *
-from sqlast.basic_ast import *
+from lib.data.database import *
+from lib.query.query_validator import *
+from lib.query.query_type import *
+from lib.binder.binder import *
+from lib.sqlast.basic_ast import *
 
 DB_FILE = 'test_e2e.db'
 
