@@ -4,8 +4,7 @@ from lib.query.query_type import *
 from lib.binder.binder import *
 from lib.sqlast.basic_ast import *
 from lib.optimizer.optimizer import *
-
-DB_FILE = 'test_e2e.db'
+from lib.utils.constants import DB_FILE
 
 
 def _format_rows(column_names: list[str], rows: list[tuple]) -> str:
@@ -49,19 +48,18 @@ class Engine:
             validated = self.query_validator.validate(query_type, command)
             if not validated:
                 return f"Invalid command"
-            
-            # Validate if table/col exists
-            table_name = "s"
-            col_names = []
-            binder_resolved = self.binder.resolve_table(table_name=table_name, column_names=col_names)
-            if not binder_resolved:
+
+            # Parse into an AST
+            ast_command = self.ast.parse(query_type=query_type, command_str=command)
+
+            # Validate table/columns referenced by the AST exist
+            if not self.binder.resolve(ast_command):
                 return f"Invalid table names/cols"
-            
-            # Optimize command
-            optimized_command = self.optimizer.optimize(command=command)
-            
+
+            # Optimize the (now-validated) AST
+            ast_command = self.optimizer.optimize(ast_command=ast_command)
+
             # Run actual query
-            ast_command = self.ast.parse(query_type=query_type, command_str=optimized_command)
             data = self.exec_db_by_type(ast_command=ast_command)
 
             if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE, QueryType.UPDATE, QueryType.DROP_TABLE):

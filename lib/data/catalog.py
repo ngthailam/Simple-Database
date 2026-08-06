@@ -2,20 +2,19 @@ from lib.data.pager import Pager, PAGE_SIZE
 from lib.data.schema import *
 import struct
 
-HEADER_PAGE = 0
-MAX_TABLES = 20
-MAX_COLUMNS = 8
-NAME_SIZE = 16
-
-HEADER_FORMAT = '<i'  # num_tables_used
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # 4
-
-COLUMN_SLOT_FORMAT = f'<{NAME_SIZE}sBi'  # name, type (1 byte unsigned), size
-COLUMN_SLOT_SIZE = struct.calcsize(COLUMN_SLOT_FORMAT)  # 21
-
-TABLE_ENTRY_FORMAT = f'<{NAME_SIZE}sii'  # name, root_page, num_columns_used
-TABLE_ENTRY_HEADER_SIZE = struct.calcsize(TABLE_ENTRY_FORMAT)  # 16 + 4 + 4 = 24
-TABLE_ENTRY_SIZE = TABLE_ENTRY_HEADER_SIZE + MAX_COLUMNS * COLUMN_SLOT_SIZE  # 24 + 168 = 192
+from lib.utils.constants import (
+    HEADER_PAGE,
+    MAX_TABLES,
+    MAX_COLUMNS,
+    NAME_SIZE,
+    CATALOG_HEADER_FORMAT as HEADER_FORMAT,
+    CATALOG_HEADER_SIZE as HEADER_SIZE,
+    COLUMN_SLOT_FORMAT,
+    COLUMN_SLOT_SIZE,
+    TABLE_ENTRY_FORMAT,
+    TABLE_ENTRY_HEADER_SIZE,
+    TABLE_ENTRY_SIZE,
+)
 
 # Catalog size = HEADER_SIZE + MAX_TABLES * TABLE_ENTRY_SIZE
 #              = 4 + 20*192

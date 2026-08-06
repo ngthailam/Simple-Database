@@ -1,9 +1,7 @@
 from enum import Enum
 from dataclasses import dataclass
 
-NAME_MAX_BYTES = 16
-TYPE_MAX_BYTES = 1
-SIZE_MAX_BYTES = 4  # int denoting the size of the column's value
+from lib.utils.constants import NAME_MAX_BYTES, TYPE_MAX_BYTES, SIZE_MAX_BYTES
 
 class ColumnType(Enum):
     INT = 1

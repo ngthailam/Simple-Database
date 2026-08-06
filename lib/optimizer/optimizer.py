@@ -1,8 +1,11 @@
+from lib.query.commands import Command
+
 
 class Optimizer:
     def __init__(self, catalog):
         self.catalog = catalog
 
-    # Optimize command by change order of WHERE clause and SELECT clause, or other optimization techniques
-    def optimize(self, command) -> str:
-        return command
+    # Optimize the parsed command, e.g. by reordering WHERE/SELECT clauses,
+    # or other optimization techniques
+    def optimize(self, ast_command: Command) -> Command:
+        return ast_command

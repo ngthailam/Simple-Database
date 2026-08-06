@@ -1,9 +1,7 @@
 import socket
 
 from engine import Engine
-
-HOST = '127.0.0.1'
-PORT = 5432
+from lib.utils.constants import HOST, PORT
 
 
 def handle_client(conn: socket.socket, engine: Engine):

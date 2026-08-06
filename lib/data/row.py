@@ -1,7 +1,6 @@
 import struct
 
-ROW_FORMAT = '<i32s255s' # Format: little-endian, 4-byte int, 32-byte string, 255-byte string
-ROW_SIZE = struct.calcsize(ROW_FORMAT) # 4 + 32 + 255 = 291 bytes
+from lib.utils.constants import ROW_FORMAT, ROW_SIZE
 
 def serialize_row(id: int, username: str, email: str) -> bytes:
     username_bytes = username.encode('utf-8')

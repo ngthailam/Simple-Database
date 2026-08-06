@@ -1,9 +1,6 @@
 import os
 
-HEADER_PAGE = 0
-
-PAGE_SIZE = 4096 # 4KB
-MAX_PAGES = 100
+from lib.utils.constants import HEADER_PAGE, PAGE_SIZE, MAX_PAGES
 
 # This is for the concept of dividing database (file) into pages
 # Each page is 4KB to match (1) Filesystem block size and (2) OS virtual memory page size

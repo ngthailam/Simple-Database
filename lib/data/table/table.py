@@ -2,19 +2,16 @@ import struct
 from lib.data.pager import Pager, PAGE_SIZE
 from lib.data.schema import ColumnDef, ColumnType
 from lib.data.catalog import TableDef
+from lib.data.table.table_interface import TableInterface
 
-MAX_DATA_PAGES = 200
-
-# root page header: num_rows(4) + num_pages_used(4) + page_numbers[MAX_DATA_PAGES](4 each)
-TABLE_HEADER_FORMAT = f'<ii{MAX_DATA_PAGES}i'
-TABLE_HEADER_SIZE = struct.calcsize(TABLE_HEADER_FORMAT)
+from lib.utils.constants import MAX_DATA_PAGES, TABLE_HEADER_FORMAT
 
 TYPE_TO_STRUCT_CHAR = {
     ColumnType.INT: 'i',
     ColumnType.TEXT: 's',
 }
 
-class Table:
+class Table(TableInterface):
     def __init__(self, pager: Pager, table_def: TableDef):
         self.pager = pager
         self.table_def = table_def
