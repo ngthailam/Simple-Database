@@ -58,21 +58,29 @@ class Engine:
             # TODO: Optimizer to optimize
             
             # Run actual query
-            data = self.exec_db_by_type(query_type=query_type, command=command)
+            ast_command = self.ast.parse(query_type=query_type, command_str=command)
+            data = self.exec_db_by_type(ast_command=ast_command)
 
-            if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE):
+            if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE, QueryType.UPDATE):
                 self.db.flush()
+
+            if query_type == QueryType.SELECT:
+                all_columns = [col.name for col in self.db.catalog.get_table(ast_command.table).columns]
+                selected_columns = all_columns if ast_command.columns == ['*'] else ast_command.columns
+                return _format_rows(selected_columns, data)
 
             return str(data)
         except Exception as e:
             return f"error handling command '{command}': {e}"
     
-    def exec_db_by_type(self, query_type: QueryType, command: str):
-        ast_command = self.ast.parse(query_type=query_type, command_str=command)
+    def exec_db_by_type(self, ast_command: Command):
         match ast_command:
             case SelectCommand():
                 return self.db.select_all(
-                    table_name=ast_command.table
+                    table_name=ast_command.table,
+                    columns=ast_command.columns,
+                    where_column=ast_command.where_column,
+                    where_value=ast_command.where_value
                 )
             case CreateTableCommand():
                 return self.db.create_table(
@@ -85,9 +93,19 @@ class Engine:
                     values=ast_command.values
                 )
             case DeleteCommand():
-                return self.db.delete_table(
-                    name=ast_command.table
-                ) 
+                return self.db.delete(
+                    table_name=ast_command.table,
+                    where_column=ast_command.where_column,
+                    where_value=ast_command.where_value
+                )
+            case UpdateCommand():
+                return self.db.update(
+                    table_name=ast_command.table,
+                    set_column=ast_command.set_column,
+                    set_value=ast_command.set_value,
+                    where_column=ast_command.where_column,
+                    where_value=ast_command.where_value
+                )
             
 
     def flush(self):

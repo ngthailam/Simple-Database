@@ -23,12 +23,30 @@ class Database:
         table = self._get_table(table_name)
         table.insert(values)
 
-    def select_all(self, table_name: str) -> list[tuple]:
+    def select_all(self, 
+        table_name: str, 
+        columns: list[str], 
+        where_column: str | None,
+        where_value: object | None
+    ) -> list[tuple]:
         table = self._get_table(table_name)
-        return table.select_all()
+        return table.select_all(columns, where_column, where_value)
+
+    def update(
+        self,
+        table_name: str,
+        set_column: str,
+        set_value: object,
+        where_column: str | None,
+        where_value: object | None,
+    ) -> int:
+        table = self._get_table(table_name)
+        return table.update(set_column, set_value, where_column, where_value)
     
-    def delete():
-        pass
+    def delete(self, table_name: str, where_column: str | None, where_value: object | None) -> int:
+        table = self._get_table(table_name)
+        return table.delete(where_column, where_value)
+
 
     def flush(self):
         for table in self.open_tables.values():
