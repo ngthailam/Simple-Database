@@ -47,7 +47,6 @@ class Database:
         table = self._get_table(table_name)
         return table.delete(where_column, where_value)
 
-
     def flush(self):
         for table in self.open_tables.values():
             table.flush_header()  # persist e.g. num_rows

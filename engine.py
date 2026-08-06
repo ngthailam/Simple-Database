@@ -61,7 +61,7 @@ class Engine:
             ast_command = self.ast.parse(query_type=query_type, command_str=command)
             data = self.exec_db_by_type(ast_command=ast_command)
 
-            if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE, QueryType.UPDATE):
+            if query_type in (QueryType.CREATE_TABLE, QueryType.INSERT, QueryType.DELETE, QueryType.UPDATE, QueryType.DROP_TABLE):
                 self.db.flush()
 
             if query_type == QueryType.SELECT:
@@ -106,7 +106,11 @@ class Engine:
                     where_column=ast_command.where_column,
                     where_value=ast_command.where_value
                 )
-            
+            case DropTableCommand():
+                return self.db.delete_table(
+                    name=ast_command.table
+                )
+
 
     def flush(self):
         self.db.close()
