@@ -1,5 +1,6 @@
 from lib.data.pager import Pager
 from lib.data.catalog import TableDef
+from typing import Callable
 import struct
 from lib.utils.constants import *
 from lib.data.btree.node import *
@@ -14,14 +15,7 @@ class BTree:
         (root_node_page, ) = struct.unpack_from(BTREE_HEADER_FORMAT, header_bytes, 0)
         
         if root_node_page == 0: # Nothing is in this page yet
-            root_node_page = self.pager.allocate_new_page()
-            initial_node = LeafNode(
-                keys=[],
-                values=[],
-                next_leaf_page_num=0,
-            )
-            self.write_node(root_node_page, initial_node)
-            self.pager.pack_into(self.header_page, 0, BTREE_HEADER_FORMAT, root_node_page)
+            self.reset()
         
         self.root_node_page = root_node_page
         
@@ -278,6 +272,40 @@ class BTree:
                 return removed_value
 
         return None
+    
+    def delete_where(self, predicate: Callable[[bytes], bool]) -> int:
+        delete_count = 0
+        for page_number, node in list(self.scan_leaves()):
+            # Only handle delete leaf node for now
+            if not isinstance(node, LeafNode):
+                continue
+
+            new_keys = []
+            new_values = []
+            changed = False
+
+            for k, v in zip(node.keys, node.values):
+                if predicate(v):
+                    delete_count += 1
+                    changed = True
+                else:
+                    new_keys.append(k)
+                    new_values.append(v)
+
+            if changed:
+                updated_node = LeafNode(keys=new_keys, values=new_values, next_leaf_page_num=node.next_leaf_page_num)
+                self._write_leaf_node(page_number, updated_node)
+                    
+        return delete_count
+    
+    def delete_all(self) -> int:
+        delete_count = 0
+        # TODO: this scan op is slow, maybe add a row count somewhere in the future
+        # for _, node in self.scan_leaves():
+        #     if not isinstance(node, LeafNode):
+        #         continue
+        #     delete_count += len(node.keys)
+        return delete_count
 
     def scan(self):
         current_page = self.root_node_page
@@ -293,3 +321,33 @@ class BTree:
             if node.next_leaf_page_num == 0:
                 break
             node = self._read_leaf_node(node.next_leaf_page_num)
+            
+    def scan_leaves(self):
+        current_page = self.root_node_page
+        node = self.read_node(current_page)
+        
+        # Get the first leaf
+        while isinstance(node, InternalNode):
+            current_page = node.children[0]
+            node = self.read_node(current_page)
+            
+        # Use the linked list in the leaf itself for faster acess, instead of tree traversal
+        while True:
+            yield current_page, node
+            
+            if node.next_leaf_page_num == 0:
+                break
+            
+            current_page = node.next_leaf_page_num
+            node = self._read_leaf_node(current_page)   
+    
+    def reset(self):
+        root_node_page = self.pager.allocate_new_page()
+        initial_node = LeafNode(
+            keys=[],
+            values=[],
+            next_leaf_page_num=0,
+        )
+        self.write_node(root_node_page, initial_node)
+        self.pager.pack_into(self.header_page, 0, BTREE_HEADER_FORMAT, root_node_page)
+        self.root_node_page = root_node_page

@@ -76,21 +76,23 @@ class BTreeTable:
         if self.primary_column_index is None:
             raise NotImplementedError("BTreeTable requires a primary key column")
 
+        # Delete by primary key column (Unique => delete 1 record only)
         if where_column is not None and self._column_index(where_column) == self.primary_column_index:
             removed = self.btree.delete(where_value)
             return 1 if removed is not None else 0
         
         # Delete * (without WHERE) => Reset the table instead, to improve performance
-        
+        if where_column is None:
+            deleted_count = self.btree.delete_all()
+            self.btree.reset()
+            return deleted_count
 
         # Delete multiple
-        deleted_count = 0
-        for key, row_bytes in list(self.btree.scan()):
+        def predicate(row_bytes: bytes) -> bool:
             row = self._deserialize_row(row_bytes)
-            if self._matches_where(row, where_column, where_value):
-                self.btree.delete(key)
-                deleted_count += 1
-        return deleted_count
+            return self._matches_where(row, where_column, where_value)
+
+        return self.btree.delete_where(predicate)
 
     def update(
         self,
