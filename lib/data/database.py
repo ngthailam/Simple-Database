@@ -23,6 +23,10 @@ class Database:
         table = self._get_table(table_name)
         table.insert(values)
 
+    def insert_all(self, table_name: str, rows: list[list]):
+        table = self._get_table(table_name)
+        table.insert_all(rows)
+
     def select_all(self, 
         table_name: str, 
         columns: list[str], 

@@ -5,6 +5,7 @@ from lib.query.commands import (
     Command,
     SelectCommand,
     InsertCommand,
+    InsertAllCommand,
     CreateTableCommand,
     DropTableCommand,
     UpdateCommand,
@@ -81,16 +82,28 @@ class BasicAst:
             where_value=where_value,
         )
 
-    def _parse_insert(self, rest: str) -> InsertCommand:
+    def _parse_insert(self, rest: str) -> InsertCommand | InsertAllCommand:
         # rest: "INTO users VALUES (1, 'alice', 'alice@example.com')"
-        match = re.match(r'INTO\s+(\w+)\s+VALUES\s*\((.+)\)', rest, flags=re.IGNORECASE)
+        #   or: "INTO users VALUES (1, 'alice'), (2, 'bob'), (3, 'carol')"
+        match = re.match(r'INTO\s+(\w+)\s+VALUES\s*(.+)', rest, flags=re.IGNORECASE)
         if not match:
             raise ValueError(f"invalid INSERT syntax: '{rest}'")
 
-        table, values_part = match.groups()
-        values = [_parse_value(v) for v in values_part.split(',')]
+        table, tuples_part = match.groups()
 
-        return InsertCommand(table=table, values=values)
+        row_matches = re.findall(r'\(([^()]*)\)', tuples_part)
+        if not row_matches:
+            raise ValueError(f"invalid INSERT syntax: '{rest}'")
+
+        rows = [
+            [_parse_value(v) for v in row.split(',')]
+            for row in row_matches
+        ]
+
+        if len(rows) == 1:
+            return InsertCommand(table=table, values=rows[0])
+
+        return InsertAllCommand(table=table, rows=rows)
 
     def _parse_create_table(self, rest: str) -> CreateTableCommand:
         # rest: "users (id INT, username TEXT(32), email TEXT(255))"

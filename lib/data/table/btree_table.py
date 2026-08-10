@@ -4,7 +4,6 @@ from lib.data.pager import Pager
 from lib.data.catalog import TableDef
 from lib.data.schema import ColumnDef, ColumnType
 from lib.data.btree.btree import BTree
-from lib.utils.constants import BNODE_LEAF_VALUE_MAX_BYTES
 
 TYPE_TO_STRUCT_CHAR = {
     ColumnType.INT: 'i',
@@ -15,10 +14,9 @@ class BTreeTable:
     def __init__(self, pager: Pager, table_def: TableDef):
         self.pager = pager
         self.table_def = table_def
-        self.btree = BTree(pager, table_def)
-
         self.primary_column_index = self._find_primary_column_index()
-        self.row_format, self.row_size = self._build_row_format(table_def.columns)
+        self.row_format, self.row_size = self._build_row_format(table_def.columns) 
+        self.btree = BTree(pager, table_def, value_size=self.row_size)
 
     def _find_primary_column_index(self) -> int | None:
         for i, col in enumerate(self.table_def.columns):
@@ -51,8 +49,8 @@ class BTreeTable:
                 packed_values.append(value)
 
         row_bytes = struct.pack(self.row_format, *packed_values)
-        if len(row_bytes) > BNODE_LEAF_VALUE_MAX_BYTES:
-            raise ValueError(f"serialized row too large ({len(row_bytes)} bytes, max {BNODE_LEAF_VALUE_MAX_BYTES})")
+        if len(row_bytes) > self.btree.leaf_entry_size:
+            raise ValueError(f"serialized row too large ({len(row_bytes)} bytes, max {self.btree.leaf_entry_size})")
         return row_bytes
 
     def _deserialize_row(self, row_bytes: bytes) -> tuple:
@@ -71,6 +69,19 @@ class BTreeTable:
         key = values[self.primary_column_index]
         row_bytes = self._serialize_row(values)
         self.btree.insert(key, row_bytes)
+        
+    def insert_all(self, values: list[list]):
+        if self.primary_column_index is None:
+                raise NotImplementedError("BTreeTable requires a primary key column")
+            
+        items = []
+        for v in values:
+            item_key = v[self.primary_column_index]
+            item_row_bytes = self._serialize_row(v)
+
+            items.append((item_key, item_row_bytes))
+            
+        self.btree.insert_all(items)
 
     def delete(self, where_column: str | None, where_value: object | None) -> int:
         if self.primary_column_index is None:

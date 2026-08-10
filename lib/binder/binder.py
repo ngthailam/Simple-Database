@@ -3,6 +3,7 @@ from lib.query.commands import (
     Command,
     SelectCommand,
     InsertCommand,
+    InsertAllCommand,
     CreateTableCommand,
     DropTableCommand,
     UpdateCommand,
@@ -44,6 +45,8 @@ class Binder:
                     columns.append(ast_command.where_column)
                 return ast_command.table, columns
             case InsertCommand():
+                return ast_command.table, []
+            case InsertAllCommand():
                 return ast_command.table, []
             case DropTableCommand():
                 return ast_command.table, []

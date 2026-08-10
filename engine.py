@@ -93,6 +93,11 @@ class Engine:
                     table_name=ast_command.table,
                     values=ast_command.values
                 )
+            case InsertAllCommand():
+                return self.db.insert_all(
+                    table_name=ast_command.table,
+                    rows=ast_command.rows
+                )
             case DeleteCommand():
                 return self.db.delete(
                     table_name=ast_command.table,

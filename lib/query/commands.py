@@ -21,6 +21,12 @@ class InsertCommand(Command):
 
 
 @dataclass
+class InsertAllCommand(Command):
+    table: str
+    rows: list[list]
+
+
+@dataclass
 class CreateTableCommand(Command):
     table: str
     columns: list[ColumnDef]

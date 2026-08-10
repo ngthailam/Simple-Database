@@ -6,18 +6,32 @@ from lib.utils.constants import *
 from lib.data.btree.node import *
 
 class BTree:
-    def __init__(self, pager: Pager, table_def: TableDef):
+    def __init__(self, pager: Pager, table_def: TableDef, value_size: int):
         self.pager = pager
         self.table_def = table_def
         self.header_page = table_def.root_page
+        self.value_size = value_size
         
+        self.leaf_entry_format = f'<i{value_size}s'
+        self.leaf_entry_size = struct.calcsize(self.leaf_entry_format)
+        self.leaf_max_keys = (PAGE_SIZE - BNODE_LEAF_HEADER_OFFSET) // self.leaf_entry_size
+        
+        if self.leaf_entry_size > BNODE_LEAF_VALUE_MAX_BYTES:
+            raise ValueError(
+                f"row size {self.leaf_entry_size} bytes exceeds max supported {BNODE_LEAF_VALUE_MAX_BYTES} "
+                f"bytes (a leaf page must hold at least one row)"
+            )
+        
+        if self.leaf_max_keys < 1:
+            raise ValueError(f"computed leaf_max_keys={self.leaf_max_keys}; row size too large for page size {PAGE_SIZE}")
+
         header_bytes = self.pager.get_page(self.header_page)
         (root_node_page, ) = struct.unpack_from(BTREE_HEADER_FORMAT, header_bytes, 0)
         
         if root_node_page == 0: # Nothing is in this page yet
             self.reset()
-        
-        self.root_node_page = root_node_page
+        else:
+            self.root_node_page = root_node_page
         
     # WRITE(s)
     def write_node(self, page_number: int, node: Node):
@@ -38,9 +52,9 @@ class BTree:
         
         offset = BNODE_LEAF_HEADER_OFFSET
         for key, value in zip(node.keys, node.values):
-            entry_bytes = struct.pack(BNODE_LEAF_ENTRY_FORMAT, key, value)
+            entry_bytes = struct.pack(self.leaf_entry_format, key, value)
             self.pager.write_bytes(page_number, offset, entry_bytes)
-            offset += struct.calcsize(BNODE_LEAF_ENTRY_FORMAT)
+            offset += struct.calcsize(self.leaf_entry_format)
         
     def _write_internal_node(self, page_number: int, node: InternalNode):
         is_leaf = 0
@@ -78,10 +92,10 @@ class BTree:
         values = []
         offset = BNODE_LEAF_HEADER_OFFSET
         for _ in range(key_num):
-            key, value = struct.unpack_from(BNODE_LEAF_ENTRY_FORMAT, page_bytes, offset)
+            key, value = struct.unpack_from(self.leaf_entry_format, page_bytes, offset)
             keys.append(key)
             values.append(value)
-            offset += struct.calcsize(BNODE_LEAF_ENTRY_FORMAT)
+            offset += struct.calcsize(self.leaf_entry_format)
 
         return LeafNode(
             keys=keys,
@@ -139,9 +153,9 @@ class BTree:
         
         return None
     
-    def insert(self, key: int, value: object) -> object | None:
-        if len(value) > BNODE_LEAF_VALUE_MAX_BYTES:
-            raise ValueError(f"Value max size is {BNODE_LEAF_VALUE_MAX_BYTES}")
+    def insert(self, key: int, value: bytes) -> object | None:
+        if len(value) > self.leaf_entry_size:
+            raise ValueError(f"Value max size is {self.leaf_entry_size}")
 
         result = self._insert_into_page(page_number=self.root_node_page, key=key, value=value)
 
@@ -155,6 +169,137 @@ class BTree:
             self.root_node_page = new_root_page
             self.pager.pack_into(self.header_page, 0, BTREE_HEADER_FORMAT, new_root_page)
         
+    # Tuple: @key: int, @value: object. Same key value as insert
+    def insert_all(self, items: list[tuple[int, bytes]]):
+        if not items:
+            # TODO: add something here ? Raise exception
+            return
+        
+        if len(items) < INSERT_ALL_REBUILD_THRESHOLD:
+            for key, value in items:
+                self.insert(key, value)
+            return
+        
+        # If pass threshold, use another approach that has better performance
+        # Connect the leafs in the linked-list, then from that, build the tree from bottom-up
+        self._insert_all_merge_rebuilt(items)
+        return 
+    
+    def _insert_all_merge_rebuilt(self, items: list[tuple[int, bytes]]):
+        # 1: Validate
+        seen_keys = set()
+        for key, value in items:
+            if len(value) > BNODE_LEAF_VALUE_MAX_BYTES:
+                raise ValueError(f"Value max size is {BNODE_LEAF_VALUE_MAX_BYTES}")
+            if key in seen_keys:
+                raise ValueError(f"Key {key} already exist")
+            seen_keys.add(key)
+            
+        # 2: Sort the batch by key
+        data_sorted = sorted(items, key=lambda kv: kv[0])
+        
+        # 3: Merge new data with existing
+        merged_data = self._merge_with_existing(data_sorted)
+        
+        # 4: Group merged data into leaf-sized chunks (no page numbers yet)
+        leaves = self._build_leaf_nodes(merged_data)
+
+        # 5: Allocate pages for each leaf, link next_leaf_page_num, write them
+        leaf_pages, leaf_first_keys = self._allocate_and_write_leaves(leaves)
+
+        # 6: Rebuild internal levels bottom-up until a single root page remains
+        new_root_page = self._build_internal_levels(leaf_pages, leaf_first_keys)
+
+        # 7: Publish the new root, same as insert()/reset()
+        self.root_node_page = new_root_page
+        self.pager.pack_into(self.header_page, 0, BTREE_HEADER_FORMAT, new_root_page)
+
+    def _build_internal_levels(self, level_pages: list[int], level_keys: list[int]) -> int:
+        # level_pages/level_keys describe one level of the tree: level_pages[i]
+        # is a child page, and level_keys[i] is the first key found under it.
+        # Loop bottom-up, one level at a time, until only the root remains.
+        if len(level_pages) == 1:
+            return level_pages[0]
+
+        while len(level_pages) > 1:
+            next_level_pages = []
+            next_level_keys = []
+
+            children_per_node = INTERNAL_MAX_KEYS + 1
+            for start in range(0, len(level_pages), children_per_node):
+                chunk_children = level_pages[start:start + children_per_node]
+                # keys[i] separates children[i]/children[i+1], so the leftmost
+                # child in the chunk contributes no key of its own - matches
+                # the InternalNode convention used everywhere else in this file.
+                chunk_keys = level_keys[start + 1:start + len(chunk_children)]
+
+                page_number = self.pager.allocate_new_page()
+                node = InternalNode(keys=chunk_keys, children=chunk_children)
+                self.write_node(page_number, node)
+
+                next_level_pages.append(page_number)
+                next_level_keys.append(level_keys[start])
+
+            level_pages = next_level_pages
+            level_keys = next_level_keys
+
+        return level_pages[0]
+
+    def _build_leaf_nodes(self, merged_data: list[tuple[int, object]]) -> list[LeafNode]:
+        if not merged_data:
+            return []
+
+        leaves = []
+        current_keys = []
+        current_values = []
+
+        for key, value in merged_data:
+            if len(current_keys) >= self.leaf_max_keys:
+                leaves.append(LeafNode(keys=current_keys, values=current_values))
+                current_keys = []
+                current_values = []
+            current_keys.append(key)
+            current_values.append(value)
+
+        leaves.append(LeafNode(keys=current_keys, values=current_values))
+        return leaves
+
+    def _allocate_and_write_leaves(self, leaves: list[LeafNode]) -> tuple[list[int], list[int]]:
+        leaf_pages = [self.pager.allocate_new_page() for _ in leaves]
+
+        for index, leaf in enumerate(leaves):
+            leaf.next_leaf_page_num = leaf_pages[index + 1] if index + 1 < len(leaf_pages) else 0
+            self.write_node(leaf_pages[index], leaf)
+
+        leaf_first_keys = [leaf.keys[0] for leaf in leaves]
+        return leaf_pages, leaf_first_keys
+
+
+    def _merge_with_existing(self, data_sorted: list[tuple[int, object]]) -> list[tuple[int, object]]:
+        existing_data = list(self.scan())  # already sorted by key
+
+        merged = []
+        i, j = 0, 0
+
+        while i < len(existing_data) and j < len(data_sorted):
+            existing_key, existing_value = existing_data[i]
+            new_key, new_value = data_sorted[j]
+
+            if existing_key < new_key:
+                merged.append(existing_data[i])
+                i += 1
+            elif new_key < existing_key:
+                merged.append(data_sorted[j])
+                j += 1
+            else:
+                raise ValueError(f"Key {existing_key} already exist")
+
+        # append whichever side has leftovers
+        merged.extend(existing_data[i:])
+        merged.extend(data_sorted[j:])
+
+        return merged
+                
     
     def _insert_into_page(self, page_number: int, key: int, value: object) -> tuple[int, int] | None:
         node = self.read_node(page_number)
@@ -179,7 +324,7 @@ class BTree:
             values.append(value)
             
             
-        if len(keys) <= LEAF_MAX_KEYS:
+        if len(keys) <= self.leaf_max_keys:
             updated_node = LeafNode(
                 keys=keys,
                 values=values,
@@ -188,7 +333,7 @@ class BTree:
             self._write_leaf_node(page_number=page_number, node=updated_node)
             return None
 
-        # If > LEAF_MAX_KEYS, do split here
+        # If > self.leaf_max_keys, do split here
         mid = len(keys) // 2
 
         left_keys, right_keys = keys[:mid], keys[mid:]

@@ -5,34 +5,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine import Engine
+from scripts.test_utils import seed_items_table
 
 ROW_COUNT = 1_000_000
 DELETE_ID = 50
 
-CATEGORIES = ['electronics', 'books', 'clothing', 'toys']
-
-
-def row(i: int) -> str:
-    category = CATEGORIES[i % len(CATEGORIES)]
-    active = i % 2
-    return f"({i}, 'item{i}', '{category}', {i * 3}, {active})"
-
 
 def seed(db_file: str) -> Engine:
-    if os.path.exists(db_file):
-        os.remove(db_file)
-
-    engine = Engine(db_file)
-    engine.handle_command(
-        "CREATE TABLE items (id INT PRIMARY KEY, name TEXT(32), category TEXT(16), score INT, active INT)"
-    )
-
-    for i in range(1, ROW_COUNT + 1):
-        result = engine.handle_command(f"INSERT INTO items VALUES {row(i)}")
-        if 'error' in str(result).lower():
-            print(f"INSERT INTO items VALUES {row(i)} -> {result}")
-
-    return engine
+    return seed_items_table(db_file, ROW_COUNT)
 
 
 def test_delete_by_id():
