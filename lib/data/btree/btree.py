@@ -71,17 +71,17 @@ class BTree:
             offset += struct.calcsize(BNODE_INTERNAL_ENTRY_FORMAT)
 
     # Read
-    def read_node(self, page_number: int) -> Node:
+    def read_node(self, page_number: int) -> Node | None:
         page_bytes = self.pager.get_page(page_number)
-        is_leaf = page_bytes[0] == 1
-        is_internal = page_bytes[0] == 0
+        is_leaf = page_bytes[0] == MARKER_TYPE_NODE_LEAF
+        is_internal = page_bytes[0] == MARKER_TYPE_NODE_INTERNAL
         
         if is_leaf:
             return self._read_leaf_node(page_number)
         elif is_internal:
             return self._read_internal_node(page_number)
         else:
-            raise ValueError("Invalid node type. Must be LeafNode or InternalNode.")
+            return None
 
     def _read_leaf_node(self, page_number: int) -> LeafNode:
         page_bytes = self.pager.get_page(page_number)
@@ -200,7 +200,14 @@ class BTree:
         
         # 3: Merge new data with existing
         merged_data = self._merge_with_existing(data_sorted)
-        
+
+        # Old tree is fully read into merged_data now - safe to enumerate its
+        # pages for freeing, but not to free them yet (new pages aren't
+        # written until steps 5/6, and allocate_new_page() could otherwise
+        # hand back a page number that's still holding data we haven't
+        # finished copying out of).
+        old_pages = self._collect_all_pages()
+
         # 4: Group merged data into leaf-sized chunks (no page numbers yet)
         leaves = self._build_leaf_nodes(merged_data)
 
@@ -213,6 +220,11 @@ class BTree:
         # 7: Publish the new root, same as insert()/reset()
         self.root_node_page = new_root_page
         self.pager.pack_into(self.header_page, 0, BTREE_HEADER_FORMAT, new_root_page)
+
+        # 8: Now that the new tree is fully written and published, the old
+        # pages are unreachable garbage - reclaim them.
+        for page_num in old_pages:
+            self.pager.free_page(page_num)
 
     def _build_internal_levels(self, level_pages: list[int], level_keys: list[int]) -> int:
         # level_pages/level_keys describe one level of the tree: level_pages[i]
@@ -305,8 +317,10 @@ class BTree:
         node = self.read_node(page_number)
         if isinstance(node, LeafNode):
             return self._insert_leaf_node_into_page(node, page_number, key, value)
-        else:
+        elif isinstance(node, InternalNode):
             return self._insert_internal_node_into_page(node, page_number, key, value)
+        else:
+            pass
     
     def _insert_leaf_node_into_page(self, node: LeafNode, page_number: int, key: int, value: object):
         keys = node.keys
@@ -443,13 +457,29 @@ class BTree:
                     
         return delete_count
     
+    def _collect_all_pages(self) -> list[int]:
+        # Full tree traversal (not scan_leaves(), which only follows the leaf
+        # linked list) - internal nodes branch, so every child must be visited
+        # to enumerate them. Reads only page headers, not full key/value data.
+        pages = []
+        stack = [self.root_node_page]
+        while stack:
+            page_num = stack.pop()
+            pages.append(page_num)
+            node = self.read_node(page_num)
+            if isinstance(node, InternalNode):
+                stack.extend(node.children)
+        return pages
+
     def delete_all(self) -> int:
         delete_count = 0
-        # TODO: this scan op is slow, maybe add a row count somewhere in the future
-        # for _, node in self.scan_leaves():
-        #     if not isinstance(node, LeafNode):
-        #         continue
-        #     delete_count += len(node.keys)
+        for _, node in self.scan_leaves():
+            delete_count += len(node.keys)
+
+        for page_num in self._collect_all_pages():
+            self.pager.free_page(page_num)
+
+        self.reset()
         return delete_count
 
     def scan(self):

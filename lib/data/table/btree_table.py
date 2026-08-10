@@ -94,9 +94,7 @@ class BTreeTable:
         
         # Delete * (without WHERE) => Reset the table instead, to improve performance
         if where_column is None:
-            deleted_count = self.btree.delete_all()
-            self.btree.reset()
-            return deleted_count
+            return self.btree.delete_all()
 
         # Delete multiple
         def predicate(row_bytes: bytes) -> bool:

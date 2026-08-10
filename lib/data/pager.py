@@ -1,7 +1,7 @@
 import os
 import struct
 
-from lib.utils.constants import HEADER_PAGE, PAGE_SIZE, MAX_PAGES
+from lib.utils.constants import *
 
 # This is for the concept of dividing database (file) into pages
 # Each page is 4KB to match (1) Filesystem block size and (2) OS virtual memory page size
@@ -14,15 +14,55 @@ class Pager:
         self.file = open(filename, 'r+b')
         self.file_length = os.path.getsize(filename)
         self.num_pages = max(1, self.file_length // PAGE_SIZE)  # page 0 always reserved
+
+        # Init helpers (must exist before get_page is called below)
         self.pages: dict[int, bytearray] = {}
         self.dirty: set[int] = set()
 
+        header_page_bytes = self.get_page(HEADER_PAGE)
+        free_list_head, = struct.unpack_from(PAGER_FREELIST_HEAD_FORMAT, header_page_bytes, PAGER_FREELIST_HEAD_OFFSET)
+        if free_list_head == 0:  # zero-filled page (brand-new DB): not yet initialized
+            free_list_head = FREELIST_EMPTY
+            struct.pack_into(PAGER_FREELIST_HEAD_FORMAT, header_page_bytes, PAGER_FREELIST_HEAD_OFFSET, free_list_head)
+        self.free_list_head = free_list_head
+
     def allocate_new_page(self) -> int:
+        # Re-use free page if possible
+        if self.free_list_head != FREELIST_EMPTY:
+            current_free_page_num = self.free_list_head
+            page_bytes = self.get_page(current_free_page_num)
+            page_type, next_free_page_num = struct.unpack_from(FREELIST_PAGE_HEADER_FORMAT, page_bytes, 0)
+            if page_type != MARKER_TYPE_FREE_PAGE:
+                raise ValueError(f"page {current_free_page_num} is on the free-list but is not marked as free (corrupt free-list)")
+
+            self._set_free_list_head(next_free_page_num)
+            self.dirty.add(current_free_page_num)
+            return current_free_page_num
+
+        # Allocate entirely new page
         page_num = self.num_pages
         self.num_pages += 1
         self.get_page(page_num)  # ensures a blank page is created and cached
         self.dirty.add(page_num)
         return page_num
+
+    # Mark a page as a free page
+    def free_page(self, page_num: int) -> None:
+        # Disallow freeing the header page
+        if page_num == HEADER_PAGE:
+            raise ValueError("Cannot free the header page")
+
+        page_bytes = self.get_page(page_num)
+        struct.pack_into(FREELIST_PAGE_HEADER_FORMAT, page_bytes, 0, MARKER_TYPE_FREE_PAGE, self.free_list_head)
+        self.dirty.add(page_num)
+
+        self._set_free_list_head(page_num)
+
+    def _set_free_list_head(self, page_num: int) -> None:
+        self.free_list_head = page_num
+        header_page_bytes = self.get_page(HEADER_PAGE)
+        struct.pack_into(PAGER_FREELIST_HEAD_FORMAT, header_page_bytes, PAGER_FREELIST_HEAD_OFFSET, page_num)
+        self.dirty.add(HEADER_PAGE)
 
     def write_bytes(self, page_num: int, offset: int, data: bytes):
         page = self.get_page(page_num)

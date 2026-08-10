@@ -2,21 +2,12 @@ from lib.data.pager import Pager, PAGE_SIZE
 from lib.data.schema import *
 import struct
 
-from lib.utils.constants import (
-    HEADER_PAGE,
-    MAX_TABLES,
-    MAX_COLUMNS,
-    NAME_SIZE,
-    CATALOG_HEADER_FORMAT as HEADER_FORMAT,
-    CATALOG_HEADER_SIZE as HEADER_SIZE,
-    COLUMN_SLOT_FORMAT,
-    COLUMN_SLOT_SIZE,
-    TABLE_ENTRY_FORMAT,
-    TABLE_ENTRY_HEADER_SIZE,
-    TABLE_ENTRY_SIZE,
-)
+from lib.utils.constants import *
 
-# Catalog size = HEADER_SIZE + MAX_TABLES * TABLE_ENTRY_SIZE
+# Catalog owns [PAGE0_CATALOG_OFFSET, ...) of page 0 - see the Page 0 layout
+# note in lib/utils/constants.py. It never reads/writes the free-list head,
+# which belongs exclusively to Pager.
+# Catalog size = CATALOG_NUM_TABLE_SIZE + TABLE_ENTRY_SIZE (MAX_TABLE * MAX_PER_TABLE)
 #              = 4 + 20*192
 #              = 4 + 3840
 #              = 3844 bytes  (fits in one 4096-byte page)
@@ -26,11 +17,11 @@ class Catalog:
         self.pager = pager
         header_page = pager.get_page(HEADER_PAGE)
 
-        self.num_tables_used, = struct.unpack_from(HEADER_FORMAT, header_page, 0)
+        self.num_tables_used, = struct.unpack_from(CATALOG_NUM_TABLE_FORMAT, header_page, CATALOG_NUM_TABLE_OFFSET)
 
         self.tables: dict[str, TableDef] = {}
         for i in range(self.num_tables_used):
-            entry_offset = HEADER_SIZE + i * TABLE_ENTRY_SIZE
+            entry_offset = CATALOG_TABLES_OFFSET + (i * TABLE_ENTRY_SIZE)
             name_bytes, root_page, num_columns_used = struct.unpack_from(
                 TABLE_ENTRY_FORMAT, header_page, entry_offset
             )
@@ -72,7 +63,7 @@ class Catalog:
         if len(name_bytes) > NAME_SIZE:
             raise ValueError(f"table name '{name}' too long (max {NAME_SIZE} bytes)")
         
-        entry_offset = HEADER_SIZE + (self.num_tables_used * TABLE_ENTRY_SIZE)
+        entry_offset = CATALOG_TABLES_OFFSET + (self.num_tables_used * TABLE_ENTRY_SIZE)
 
         self.pager.pack_into(HEADER_PAGE, entry_offset, TABLE_ENTRY_FORMAT, name_bytes, root_page, len(columns))
 
@@ -87,7 +78,7 @@ class Catalog:
             self.pager.pack_into(HEADER_PAGE, col_offset, COLUMN_SLOT_FORMAT, col_name_bytes, col.type.value, col.size, col_is_primary_bytes)
 
         self.num_tables_used += 1
-        self.pager.pack_into(HEADER_PAGE, 0, HEADER_FORMAT, self.num_tables_used)
+        self.pager.pack_into(HEADER_PAGE, CATALOG_NUM_TABLE_OFFSET, CATALOG_NUM_TABLE_FORMAT, self.num_tables_used)
 
         table_def = TableDef(name, root_page, columns)
         self.tables[name] = table_def
@@ -105,18 +96,18 @@ class Catalog:
         # Shift every later entry down one slot to keep entries dense (slots
         # 0..num_tables_used-1), since num_tables_used assumes no gaps.
         for i in range(index, self.num_tables_used - 1):
-            src_offset = HEADER_SIZE + (i + 1) * TABLE_ENTRY_SIZE
-            dst_offset = HEADER_SIZE + i * TABLE_ENTRY_SIZE
+            src_offset = CATALOG_TABLES_OFFSET + (i + 1) * TABLE_ENTRY_SIZE
+            dst_offset = CATALOG_TABLES_OFFSET + i * TABLE_ENTRY_SIZE
             self.pager.write_bytes(
                 HEADER_PAGE, dst_offset,
                 bytes(header_page[src_offset:src_offset + TABLE_ENTRY_SIZE])
             )
 
         # Zero out the now-unused last slot.
-        last_offset = HEADER_SIZE + (self.num_tables_used - 1) * TABLE_ENTRY_SIZE
+        last_offset = CATALOG_TABLES_OFFSET + (self.num_tables_used - 1) * TABLE_ENTRY_SIZE
         self.pager.write_bytes(HEADER_PAGE, last_offset, bytes(TABLE_ENTRY_SIZE))
 
         self.num_tables_used -= 1
-        self.pager.pack_into(HEADER_PAGE, 0, HEADER_FORMAT, self.num_tables_used)
+        self.pager.pack_into(HEADER_PAGE, CATALOG_NUM_TABLE_OFFSET, CATALOG_NUM_TABLE_FORMAT, self.num_tables_used)
 
         del self.tables[name]
