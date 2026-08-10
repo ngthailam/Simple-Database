@@ -106,13 +106,18 @@ class BasicAst:
         return CreateTableCommand(table=table, columns=columns)
 
     def _parse_column_def(self, col_def: str) -> ColumnDef:
-        # "username TEXT(32)"  or  "id INT"
-        match = re.match(r'(\w+)\s+(INT|TEXT)(?:\((\d+)\))?', col_def, flags=re.IGNORECASE)
+        # "username TEXT(32)"  or  "id INT"  or  "id INT PRIMARY KEY"
+        match = re.match(
+            r'(\w+)\s+(INT|TEXT)(?:\((\d+)\))?(\s+PRIMARY\s+KEY)?',
+            col_def,
+            flags=re.IGNORECASE,
+        )
         if not match:
             raise ValueError(f"invalid column definition: '{col_def}'")
 
-        name, type_str, size_str = match.groups()
+        name, type_str, size_str, primary_key_str = match.groups()
         col_type = ColumnType[type_str.upper()]
+        is_primary = primary_key_str is not None
 
         if col_type == ColumnType.INT:
             size = 4
@@ -120,8 +125,10 @@ class BasicAst:
             if size_str is None:
                 raise ValueError(f"TEXT column '{name}' requires a size, e.g. TEXT(32)")
             size = int(size_str)
+            if is_primary:
+                raise ValueError(f"PRIMARY KEY column '{name}' must be INT")
 
-        return ColumnDef(name=name, type=col_type, size=size)
+        return ColumnDef(name=name, type=col_type, size=size, is_primary=is_primary)
 
     def _parse_drop_table(self, rest: str) -> DropTableCommand:
         table = rest.strip()

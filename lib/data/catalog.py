@@ -39,13 +39,14 @@ class Catalog:
             columns = []
             for j in range(num_columns_used):
                 col_offset = entry_offset + TABLE_ENTRY_HEADER_SIZE + j * COLUMN_SLOT_SIZE
-                col_name_bytes, col_type, col_size = struct.unpack_from(
+                col_name_bytes, col_type, col_size, col_is_primary = struct.unpack_from(
                     COLUMN_SLOT_FORMAT, header_page, col_offset
                 )
                 columns.append(ColumnDef(
                     col_name_bytes.rstrip(b'\x00').decode('utf-8'),
                     ColumnType(col_type),
                     col_size,
+                    bool(col_is_primary)
                 ))
 
             self.tables[table_name] = TableDef(table_name, root_page, columns)
@@ -71,21 +72,22 @@ class Catalog:
         if len(name_bytes) > NAME_SIZE:
             raise ValueError(f"table name '{name}' too long (max {NAME_SIZE} bytes)")
         
-        header_page = self.pager.get_page(HEADER_PAGE)
         entry_offset = HEADER_SIZE + (self.num_tables_used * TABLE_ENTRY_SIZE)
 
-        struct.pack_into(TABLE_ENTRY_FORMAT, header_page, entry_offset, name_bytes, root_page, len(columns))
+        self.pager.pack_into(HEADER_PAGE, entry_offset, TABLE_ENTRY_FORMAT, name_bytes, root_page, len(columns))
 
         for j, col in enumerate(columns):
             col_name_bytes = col.name.encode('utf-8')
             if len(col_name_bytes) > NAME_SIZE:
                 raise ValueError(f"column name '{col.name}' too long (max {NAME_SIZE} bytes)")
 
+            col_is_primary_bytes = 1 if col.is_primary else 0
             col_offset = entry_offset + TABLE_ENTRY_HEADER_SIZE + j * COLUMN_SLOT_SIZE
-            struct.pack_into(COLUMN_SLOT_FORMAT, header_page, col_offset, col_name_bytes, col.type.value, col.size)
+
+            self.pager.pack_into(HEADER_PAGE, col_offset, COLUMN_SLOT_FORMAT, col_name_bytes, col.type.value, col.size, col_is_primary_bytes)
 
         self.num_tables_used += 1
-        struct.pack_into(HEADER_FORMAT, header_page, 0, self.num_tables_used)
+        self.pager.pack_into(HEADER_PAGE, 0, HEADER_FORMAT, self.num_tables_used)
 
         table_def = TableDef(name, root_page, columns)
         self.tables[name] = table_def
@@ -105,14 +107,16 @@ class Catalog:
         for i in range(index, self.num_tables_used - 1):
             src_offset = HEADER_SIZE + (i + 1) * TABLE_ENTRY_SIZE
             dst_offset = HEADER_SIZE + i * TABLE_ENTRY_SIZE
-            header_page[dst_offset:dst_offset + TABLE_ENTRY_SIZE] = \
-                header_page[src_offset:src_offset + TABLE_ENTRY_SIZE]
+            self.pager.write_bytes(
+                HEADER_PAGE, dst_offset,
+                bytes(header_page[src_offset:src_offset + TABLE_ENTRY_SIZE])
+            )
 
         # Zero out the now-unused last slot.
         last_offset = HEADER_SIZE + (self.num_tables_used - 1) * TABLE_ENTRY_SIZE
-        header_page[last_offset:last_offset + TABLE_ENTRY_SIZE] = bytes(TABLE_ENTRY_SIZE)
+        self.pager.write_bytes(HEADER_PAGE, last_offset, bytes(TABLE_ENTRY_SIZE))
 
         self.num_tables_used -= 1
-        struct.pack_into(HEADER_FORMAT, header_page, 0, self.num_tables_used)
+        self.pager.pack_into(HEADER_PAGE, 0, HEADER_FORMAT, self.num_tables_used)
 
         del self.tables[name]

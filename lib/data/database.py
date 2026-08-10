@@ -1,18 +1,18 @@
 from lib.data.pager import Pager, PAGE_SIZE
 from lib.data.catalog import Catalog, MAX_TABLES, MAX_COLUMNS
 from lib.data.schema import ColumnDef, ColumnType
-from lib.data.table.table import Table
+from lib.data.table.btree_table import BTreeTable
 
 class Database:
     def __init__(self, pager: Pager, catalog: Catalog):
         self.pager = pager
         self.catalog = catalog
-        self.open_tables: dict[str, Table] = {}
+        self.open_tables: dict[str, BTreeTable] = {}
 
     def create_table(self, name: str, columns: list[ColumnDef]):
         root_page = self.pager.allocate_new_page()
         table_def = self.catalog.create_table(name, columns, root_page)
-        self.open_tables[name] = Table(self.pager, table_def)
+        self.open_tables[name] = BTreeTable(self.pager, table_def)
         return table_def
     
     def delete_table(self, name: str):
@@ -57,8 +57,8 @@ class Database:
         self.pager.close()
 
     # Private methods
-    def _get_table(self, name: str) -> Table:
+    def _get_table(self, name: str) -> BTreeTable:
         if name not in self.open_tables:
             table_def = self.catalog.get_table(name)
-            self.open_tables[name] = Table(self.pager, table_def)
+            self.open_tables[name] = BTreeTable(self.pager, table_def)
         return self.open_tables[name]

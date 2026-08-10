@@ -1,7 +1,7 @@
 from enum import Enum
 from dataclasses import dataclass
 
-from lib.utils.constants import NAME_MAX_BYTES, TYPE_MAX_BYTES, SIZE_MAX_BYTES
+from lib.utils.constants import NAME_MAX_BYTES, TYPE_MAX_BYTES, SIZE_MAX_BYTES, IS_PRIMARY_MAX_BYTES
 
 class ColumnType(Enum):
     INT = 1
@@ -12,9 +12,10 @@ class ColumnDef:
     name: str
     type: ColumnType
     size: int
+    is_primary: bool = False
 
     def get_size_bytes(self):
-        return NAME_MAX_BYTES + TYPE_MAX_BYTES + SIZE_MAX_BYTES
+        return NAME_MAX_BYTES + TYPE_MAX_BYTES + SIZE_MAX_BYTES + IS_PRIMARY_MAX_BYTES
 
 @dataclass
 class TableDef:

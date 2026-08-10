@@ -1,4 +1,5 @@
 import os
+import struct
 
 from lib.utils.constants import HEADER_PAGE, PAGE_SIZE, MAX_PAGES
 
@@ -14,13 +15,25 @@ class Pager:
         self.file_length = os.path.getsize(filename)
         self.num_pages = max(1, self.file_length // PAGE_SIZE)  # page 0 always reserved
         self.pages: dict[int, bytearray] = {}
+        self.dirty: set[int] = set()
 
     def allocate_new_page(self) -> int:
         page_num = self.num_pages
         self.num_pages += 1
         self.get_page(page_num)  # ensures a blank page is created and cached
+        self.dirty.add(page_num)
         return page_num
-        
+
+    def write_bytes(self, page_num: int, offset: int, data: bytes):
+        page = self.get_page(page_num)
+        page[offset:offset + len(data)] = data
+        self.dirty.add(page_num)
+
+    def pack_into(self, page_num: int, offset: int, fmt: str, *args):
+        page = self.get_page(page_num)
+        struct.pack_into(fmt, page, offset, *args)
+        self.dirty.add(page_num)
+
     def get_page(self, page_num: int) -> bytearray:
         if page_num > MAX_PAGES:
             raise ValueError(f"page number out of bounds: {page_num}")
@@ -47,33 +60,17 @@ class Pager:
     def flush(self, page_num: int):
         if page_num not in self.pages:
             return
-        
+
         self.file.seek(page_num * PAGE_SIZE)
         self.file.write(self.pages[page_num])
         self.file.flush()
         self.file_length = max(self.file_length, (page_num + 1) * PAGE_SIZE)
+        self.dirty.discard(page_num)
 
     def flush_all(self):
-        for page_num in self.pages:
+        for page_num in list(self.dirty):
             self.flush(page_num)
 
     def close(self):
         self.flush_all()
         self.file.close()
-
-if __name__ == '__main__':
-    pager = Pager('test_pages.db')
-
-    page0 = pager.get_page(0)
-    page0[0:5] = b'hello'   # mutate bytes directly within the page
-
-    page1 = pager.get_page(1)
-    page1[0:5] = b'world'
-
-    pager.close()  # writes both pages back to disk
-
-    # reopen and verify persistence
-    pager2 = Pager('test_pages.db')
-    print(pager2.get_page(0)[0:5])  # b'hello'
-    print(pager2.get_page(1)[0:5])  # b'world'
-    pager2.close()
